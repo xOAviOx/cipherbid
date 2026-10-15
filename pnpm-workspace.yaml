@@ -1,0 +1,17 @@
+packages:
+  - apps/*
+  - packages/*
+allowBuilds:
+  '@foundry-rs/anvil': true
+  '@foundry-rs/cast': true
+  '@foundry-rs/forge': true
+  esbuild: true
+  keccak: true
+  secp256k1: true
+minimumReleaseAgeExclude:
+  - '@playwright/test@1.64.1'
+  - playwright-core@1.64.1
+  - playwright@1.64.1
+  - react-dom@19.3.1
+  - react@19.3.1
+  - viem@2.57.7

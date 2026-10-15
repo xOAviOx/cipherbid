@@ -1,0 +1,11 @@
+node_modules/
+dist/
+contracts/out/
+contracts/cache/
+broadcast/
+playwright-report/
+test-results/
+.local/
+apps/web/public/deployment.json
+*.log
+.DS_Store
