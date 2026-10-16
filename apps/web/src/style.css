@@ -730,6 +730,9 @@ footer > small {
 .alert > .button {
   margin-left: auto;
 }
+.alert > .button + .button {
+  margin-left: 0;
+}
 .empty {
   padding: 60px 20px;
   text-align: center;

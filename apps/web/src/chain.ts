@@ -21,7 +21,7 @@ export const config = createConfig({
   chains: [localChain],
   connectors: [injected()],
   transports: { [CHAIN_ID]: http(RPC_URL) },
-  multiInjectedProviderDiscovery: false,
+  multiInjectedProviderDiscovery: true,
 })
 export const publicClient = createPublicClient({
   chain: localChain,

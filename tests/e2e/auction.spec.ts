@@ -89,10 +89,15 @@ async function advanceTo(timestamp: bigint) {
   await rpc('evm_setNextBlockTimestamp', [Number(timestamp)])
   await rpc('evm_mine')
 }
-async function inject(page: Page, index = 1, network = CHAIN_ID) {
+async function inject(
+  page: Page,
+  index = 1,
+  network = CHAIN_ID,
+  announced: ('local' | 'phantom')[] = [],
+) {
   // EIP-1193 local-test fixture. No keys and no test wallet code in the application bundle.
   await page.addInitScript(
-    ({ account, network, rpcURL }) => {
+    ({ account, network, rpcURL, announced, phantomAccount }) => {
       const handlers = new Map<string, Set<(...args: unknown[]) => void>>()
       let currentChain = network
       let reject = false
@@ -148,8 +153,57 @@ async function inject(page: Page, index = 1, network = CHAIN_ID) {
           emit('chainChanged', '0x1')
         },
       })
+      if (!announced.length) return
+      // EIP-6963 discovery of the working fixture and/or a stand-in for Phantom, which only
+      // supports built-in networks and rejects CipherBid Local. Announced wallets that return
+      // accounts count as already authorized, so wagmi restores them on page load.
+      const phantom = {
+        on() {},
+        removeListener() {},
+        async request({ method }: { method: string }) {
+          if (method === 'eth_chainId') return '0x1'
+          if (method === 'eth_accounts' || method === 'eth_requestAccounts') return [phantomAccount]
+          if (method === 'wallet_revokePermissions') return null
+          throw Object.assign(new Error('Unsupported network'), { code: 4902 })
+        },
+      }
+      const icon = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>'
+      const wallets = [
+        announced.includes('local') && {
+          info: {
+            uuid: 'cipherbid-test-wallet',
+            name: 'Local Test Wallet',
+            icon,
+            rdns: 'dev.cipherbid.test',
+          },
+          provider,
+        },
+        announced.includes('phantom') && {
+          info: { uuid: 'cipherbid-test-phantom', name: 'Phantom', icon, rdns: 'app.phantom' },
+          provider: phantom,
+        },
+      ].filter(Boolean)
+      const announceAll = () =>
+        wallets.forEach((detail) =>
+          window.dispatchEvent(
+            new CustomEvent('eip6963:announceProvider', { detail: Object.freeze(detail) }),
+          ),
+        )
+      window.addEventListener('eip6963:requestProvider', announceAll)
+      announceAll()
+      // As for a user who tried Phantom first and then installed MetaMask.
+      if (announced.includes('phantom') && !sessionStorage.getItem('cipherbid-test-restored')) {
+        sessionStorage.setItem('cipherbid-test-restored', '1')
+        localStorage.setItem('wagmi.recentConnectorId', JSON.stringify('app.phantom'))
+      }
     },
-    { account: accounts[index]!, network, rpcURL: RPC_URL },
+    {
+      account: accounts[index]!,
+      network,
+      rpcURL: RPC_URL,
+      announced,
+      phantomAccount: accounts[index + 1]!,
+    },
   )
 }
 async function connect(page: Page) {
@@ -417,6 +471,57 @@ test('wallet rejection retains the secret; wrong network blocks writes; mobile r
     fullPage: true,
   })
   await page.getByRole('button', { name: 'Switch network', exact: true }).click()
+  await expect(page.getByText('Wrong network.', { exact: true })).not.toBeVisible()
+})
+
+test('a wallet restored on another network can bid after switching to CipherBid Local', async ({
+  page,
+}) => {
+  const id = await newAuction()
+  await inject(page, 1, 1, ['local'])
+  await openAuction(page, id)
+  await expect(page.getByText('Wrong network.', { exact: true })).toBeVisible()
+  const prepare = page.getByRole('button', { name: 'Prepare & save secret' })
+  await expect(prepare).toBeDisabled()
+  // Approving a real wallet's network prompt takes longer than the wallet-client query's retry.
+  await page.waitForTimeout(2500)
+  await page.getByRole('button', { name: 'Switch network', exact: true }).click()
+  await expect(page.getByText('Wrong network.', { exact: true })).not.toBeVisible()
+  await expect(prepare).toBeEnabled()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
+test('a restored Phantom connection is replaced cleanly by a local-network wallet', async ({
+  page,
+}) => {
+  await inject(page, 1, CHAIN_ID, ['local', 'phantom'])
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'The collection' })).toBeVisible()
+  const warning = page.getByRole('alert').filter({ hasText: 'Wrong network.' })
+  await expect(warning).toContainText('Phantom cannot use CipherBid Local')
+  await expect(page.getByRole('button', { name: 'Switch network', exact: true })).toHaveCount(0)
+  await warning.getByRole('button', { name: 'Choose another wallet', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toContainText('Connected with Phantom.')
+  await expect(
+    dialog.getByRole('button', { name: 'Phantom · Local networks unsupported', exact: true }),
+  ).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: /Injected/ })).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Switch to Local Test Wallet', exact: true }).click()
+  await expect(dialog).not.toBeVisible()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'The collection' })).toBeVisible()
+  await expect(page.locator('.wallet-button')).not.toHaveText('Connect wallet')
+  await expect(page.getByText('Wrong network.', { exact: true })).not.toBeVisible()
+  await page.locator('.wallet-button').click()
+  await expect(dialog).toContainText('Connected with Local Test Wallet.')
+  await expect(
+    dialog.getByRole('button', { name: 'Local Test Wallet · Connected', exact: true }),
+  ).toBeDisabled()
+  await dialog.getByRole('button', { name: 'Disconnect wallet', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Connect wallet', exact: true })).toBeVisible()
   await expect(page.getByText('Wrong network.', { exact: true })).not.toBeVisible()
 })
 

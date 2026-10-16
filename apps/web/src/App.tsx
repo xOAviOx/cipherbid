@@ -1,6 +1,7 @@
 import { useState, type ReactNode, type FormEvent } from 'react'
 import {
   useConnection,
+  useConnections,
   useConnect,
   useConnectors,
   useDisconnect,
@@ -72,6 +73,9 @@ const title = (id: bigint) =>
   ['Orbital Form', 'Quiet Intersections', 'Violet Assembly', 'A Study in Balance'][
     Number((id - 1n) % 4n)
   ]
+// Phantom cannot add custom chains, so it can never reach the local Anvil network.
+const isPhantom = (c?: { id: string; name: string }) =>
+  !!c && (c.id === 'app.phantom' || /phantom/i.test(c.name))
 function failure(error: unknown): string {
   // Never surface RPC payloads, calldata, or raw wallet errors: reveal errors can contain the secret.
   const text = String(error).toLowerCase()
@@ -136,10 +140,18 @@ export default function App() {
   const connection = useConnection()
   const { address, chainId } = connection
   const connectors = useConnectors()
+  const connections = useConnections()
+  const discoveredWallets = connectors.filter((c) => c.id !== 'injected')
+  const walletChoices = [...(discoveredWallets.length ? discoveredWallets : connectors)].sort(
+    (a, b) => Number(isPhantom(a)) - Number(isPhantom(b)),
+  )
+  const connectedWithPhantom = isPhantom(connection.connector)
   const connect = useConnect(),
     disconnect = useDisconnect(),
     switchChain = useSwitchChain()
-  const wallet = useWalletClient()
+  // The cached client is keyed by the configured chain, not the wallet's current one. Building it
+  // on another network fails with a chain mismatch that is never retried after the wallet switches.
+  const wallet = useWalletClient({ chainId: CHAIN_ID, query: { enabled: chainId === CHAIN_ID } })
   const [view, setView] = useState<View>('explore')
   const [selected, setSelected] = useState<bigint>()
   const [filter, setFilter] = useState('All auctions')
@@ -254,6 +266,25 @@ export default function App() {
     setError('')
     setNotice('')
     window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  // Wagmi restores every authorized wallet on load and promotes a leftover one after a
+  // disconnect, so a single disconnect could silently hand control back to Phantom.
+  async function disconnectAll() {
+    for (const { connector } of connections) await disconnect.mutateAsync({ connector })
+  }
+  async function chooseWallet(c: (typeof connectors)[number]) {
+    setError('')
+    try {
+      // Disconnecting the old wallet after connecting could revoke permissions on a provider the
+      // new wallet shares.
+      await disconnectAll()
+      await connect.mutateAsync({ connector: c })
+      setWalletOpen(false)
+    } catch {
+      setError(
+        'Wallet connection was rejected or unavailable. Choose MetaMask or Rabby for this local chain.',
+      )
+    }
   }
   const reload = async () => {
     await Promise.all([
@@ -378,7 +409,9 @@ export default function App() {
       if (amount < row.auction.reserve || amount > row.auction.collateral)
         throw new Error('Your bid must be between the reserve and collateral, inclusive.')
       if (data.balance < row.auction.collateral + row.auction.bond)
-        throw new Error('Insufficient development ETH for the deposit (plus gas).')
+        throw new Error(
+          `Insufficient development ETH for the deposit (plus gas). Fund this wallet with: pnpm fund:local --address ${address}`,
+        )
       const salt = randomSalt()
       const secret: Secret = {
         schemaVersion: 1,
@@ -509,51 +542,52 @@ export default function App() {
           <Dialog.Content className="dialog">
             <Dialog.Title>Your local wallet</Dialog.Title>
             <Dialog.Description>
-              Use a browser wallet connected to Anvil on port 8546, chain 31338. Never fund these
-              development accounts with real ETH.
+              Use MetaMask, Rabby, or another wallet that supports custom local networks. Phantom
+              cannot add CipherBid’s local chain. Never use real ETH here.
             </Dialog.Description>
             <Dialog.Close className="close" aria-label="Close wallet dialog">
               <X />
             </Dialog.Close>
-            {address ? (
+            {address && (
               <>
+                <p>Connected with {connection.connector?.name ?? 'your browser wallet'}.</p>
                 <p className="mono wrap">{address}</p>
                 <button
                   className="button"
                   onClick={() => {
-                    disconnect.mutate()
-                    setWalletOpen(false)
+                    void disconnectAll().finally(() => setWalletOpen(false))
                   }}
                 >
                   Disconnect wallet
                 </button>
               </>
-            ) : (
-              connectors.map((c) => (
+            )}
+            {walletChoices.map((c) => {
+              const unsupported = isPhantom(c)
+              const current = c.uid === connection.connector?.uid
+              return (
                 <button
                   className="button"
                   key={c.uid}
-                  disabled={connect.isPending}
-                  onClick={() => {
-                    void connect
-                      .mutateAsync({ connector: c })
-                      .then(() => setWalletOpen(false))
-                      .catch(() =>
-                        setError(
-                          'Wallet connection was rejected or unavailable. Install an injected browser wallet for the local chain.',
-                        ),
-                      )
-                  }}
+                  disabled={connect.isPending || disconnect.isPending || unsupported || current}
+                  title={
+                    unsupported ? 'Phantom does not support custom local networks.' : undefined
+                  }
+                  onClick={() => void chooseWallet(c)}
                 >
-                  Connect {c.name}
-                  <ArrowRight size={16} />
+                  {unsupported
+                    ? `${c.name} · Local networks unsupported`
+                    : current
+                      ? `${c.name} · Connected`
+                      : address
+                        ? `Switch to ${c.name}`
+                        : `Connect ${c.name}`}
+                  {!unsupported && !current && <ArrowRight size={16} />}
                 </button>
-              ))
-            )}
+              )
+            })}
             {!connectors.length && (
-              <p>
-                No injected wallet detected. Install a local-compatible browser wallet, then reload.
-              </p>
+              <p>No injected wallet detected. Install MetaMask or Rabby, then reload this page.</p>
             )}
             <dl className="rpc-list">
               <dt>RPC URL</dt>
@@ -569,21 +603,38 @@ export default function App() {
       <main id="main">
         {wrongNetwork && (
           <div role="alert" className="alert">
-            <strong>Wrong network.</strong> Switch your wallet to CipherBid Local, chain 31338.
-            Public auctions still work.
-            <button
-              className="button secondary"
-              onClick={() =>
-                void switchChain
-                  .mutateAsync({ chainId: CHAIN_ID })
-                  .catch(() =>
-                    setError(
-                      'Could not switch networks. Add the local network using the wallet details.',
-                    ),
-                  )
-              }
-            >
-              Switch network
+            <strong>Wrong network.</strong>{' '}
+            {connectedWithPhantom
+              ? 'Phantom cannot use CipherBid Local because it does not support custom networks. Choose MetaMask or Rabby instead. Public auctions still work.'
+              : 'Switch your wallet to CipherBid Local, chain 31338. Public auctions still work.'}
+            {!connectedWithPhantom && (
+              <button
+                className="button secondary"
+                onClick={() =>
+                  void switchChain
+                    .mutateAsync({ chainId: CHAIN_ID })
+                    .then(() => setError(''))
+                    .catch(() =>
+                      setError(
+                        'Your wallet did not switch networks. Approve adding CipherBid Local, or add it manually with the details in the wallet dialog. Phantom does not support custom local chains; use MetaMask or Rabby.',
+                      ),
+                    )
+                }
+              >
+                Switch network
+              </button>
+            )}
+            <button className="button secondary" onClick={() => setWalletOpen(true)}>
+              Choose another wallet
+            </button>
+          </div>
+        )}
+        {address && !wrongNetwork && wallet.isError && (
+          <div role="alert" className="alert">
+            Your wallet is connected, but it did not give CipherBid signing access. Unlock it, then
+            retry.
+            <button className="button secondary" onClick={() => void wallet.refetch()}>
+              Retry wallet
             </button>
           </div>
         )}
@@ -629,6 +680,7 @@ export default function App() {
                   secret={localSecret(row.id)}
                   events={data.index.events}
                   address={address}
+                  balance={data.balance}
                   canWrite={canWrite}
                   prepare={prepare}
                   transaction={transaction}
@@ -1009,6 +1061,7 @@ function Detail({
   secret,
   events,
   address,
+  balance,
   canWrite,
   prepare,
   transaction,
@@ -1022,6 +1075,7 @@ function Detail({
   secret?: Secret
   events: IndexedEvent[]
   address?: Address
+  balance: bigint
   canWrite: boolean
   prepare: (r: Row, a: string) => Promise<void>
   transaction: Tx
@@ -1155,6 +1209,13 @@ function Detail({
                 <strong>{eth(a.collateral)} ETH (C)</strong> and lose{' '}
                 <strong>{eth(a.bond)} ETH (B)</strong>.
               </p>
+              {address && !secret && balance < a.collateral + a.bond && (
+                <p className="wrap">
+                  Your wallet has {eth(balance)} ETH, not enough for this deposit plus gas. Fund it
+                  with development ETH from a terminal:{' '}
+                  <code>pnpm fund:local --address {address}</code>
+                </p>
+              )}
               {!secret ? (
                 <form
                   onSubmit={(e) => {
