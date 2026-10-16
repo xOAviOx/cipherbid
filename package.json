@@ -12,6 +12,8 @@
     "contracts:build": "forge build && tsx scripts/artifacts.ts",
     "deploy:local": "pnpm contracts:build && tsx scripts/local.ts deploy",
     "seed": "tsx scripts/local.ts seed",
+    "fund:local": "tsx scripts/local.ts fund",
+    "mint:local": "tsx scripts/local.ts mint",
     "dev": "vite --config apps/web/vite.config.ts --host 127.0.0.1",
     "demo": "tsx scripts/local.ts demo",
     "time:advance": "tsx scripts/local.ts time",
