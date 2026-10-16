@@ -1,0 +1,9 @@
+pnpm-lock.yaml
+packages/shared/src/generated.ts
+THIRD_PARTY_NOTICES.txt
+dist
+node_modules
+contracts/out
+contracts/cache
+test-results
+playwright-report
