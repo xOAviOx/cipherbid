@@ -24,7 +24,8 @@
     "typecheck": "tsc --noEmit",
     "build": "pnpm typecheck && vite build --config apps/web/vite.config.ts",
     "preview": "vite preview --config apps/web/vite.config.ts --host 127.0.0.1",
-    "licenses": "pnpm licenses list --prod"
+    "licenses": "pnpm licenses list --prod",
+    "licenses:generate": "tsx scripts/notices.ts"
   },
   "dependencies": {
     "@openzeppelin/contracts": "5.6.1",
