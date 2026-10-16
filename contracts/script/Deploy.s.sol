@@ -12,6 +12,7 @@ interface DeployVm {
 /// @dev Optional Forge deployment entry point. The documented pnpm command also exports metadata.
 contract Deploy {
     DeployVm constant vm = DeployVm(address(uint160(uint256(keccak256("hevm cheat code")))));
+
     function run() external {
         require(block.chainid == 31338, "local chain only");
         bytes32 identity = vm.envBytes32("CIPHERBID_DEPLOYMENT_ID");

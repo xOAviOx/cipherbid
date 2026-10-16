@@ -14,7 +14,16 @@ interface Vm {
 
 contract TestBase {
     Vm internal constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
-    function eq(uint256 a, uint256 b) internal pure { require(a == b, "uint mismatch"); }
-    function eq(address a, address b) internal pure { require(a == b, "address mismatch"); }
-    function yes(bool b) internal pure { require(b, "assertion failed"); }
+
+    function eq(uint256 a, uint256 b) internal pure {
+        require(a == b, "uint mismatch");
+    }
+
+    function eq(address a, address b) internal pure {
+        require(a == b, "address mismatch");
+    }
+
+    function yes(bool b) internal pure {
+        require(b, "assertion failed");
+    }
 }

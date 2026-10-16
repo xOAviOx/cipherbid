@@ -96,13 +96,17 @@ contract CipherBid is IERC721Receiver, ReentrancyGuard {
     }
 
     function createAuction(
-        address nft, uint256 tokenId, uint256 reserve, uint256 collateral,
-        uint256 bond, uint256 commitDeadline, uint256 revealDeadline
+        address nft,
+        uint256 tokenId,
+        uint256 reserve,
+        uint256 collateral,
+        uint256 bond,
+        uint256 commitDeadline,
+        uint256 revealDeadline
     ) external nonReentrant returns (uint256 id) {
         if (
             reserve == 0 || reserve > collateral || bond == 0 || collateral > type(uint256).max - bond
-                || commitDeadline <= block.timestamp || revealDeadline <= commitDeadline
-                || nft.code.length == 0
+                || commitDeadline <= block.timestamp || revealDeadline <= commitDeadline || nft.code.length == 0
         ) revert InvalidParameters();
         if (!IERC165(nft).supportsInterface(type(IERC721).interfaceId)) revert InvalidParameters();
         if (IERC721(nft).ownerOf(tokenId) != msg.sender) revert Unauthorized();
@@ -132,11 +136,12 @@ contract CipherBid is IERC721Receiver, ReentrancyGuard {
     }
 
     function onERC721Received(address operator, address from, uint256 tokenId, bytes calldata)
-        external returns (bytes4)
+        external
+        returns (bytes4)
     {
         if (
-            msg.sender != expectedNFT || from != expectedFrom || tokenId != expectedToken
-                || operator != address(this) || escrowReceived
+            msg.sender != expectedNFT || from != expectedFrom || tokenId != expectedToken || operator != address(this)
+                || escrowReceived
         ) revert UnexpectedNFT();
         escrowReceived = true;
         return IERC721Receiver.onERC721Received.selector;
@@ -159,7 +164,9 @@ contract CipherBid is IERC721Receiver, ReentrancyGuard {
 
     function reveal(uint256 id, uint256 amount, bytes32 salt) external {
         Auction storage a = _auction(id);
-        if (a.cancelled || block.timestamp < a.commitDeadline || block.timestamp >= a.revealDeadline) revert WrongPhase();
+        if (a.cancelled || block.timestamp < a.commitDeadline || block.timestamp >= a.revealDeadline) {
+            revert WrongPhase();
+        }
         Bid storage b = bids[id][msg.sender];
         if (b.revealed) revert AlreadyRevealed();
         if (
